@@ -33,7 +33,8 @@ Updates the prior for the next day using the posterior values from the current d
 
 ##### probability_of_being_best(n_samples=100_000)
 
-Uses Monte Carlo simulation to estimate the probability that each variant is the best performer.
+Uses Monte Carlo simulation to estimate the probability that each variant is the best performer. Instead of relying on a single conversion rate, we simulate many possible scenarios and see which option wins most often.
+e.g If H2+B2 has 48% probability of being best, it means that in 48,000 out of the 100,000 simulations, it was the top performer. 
 
 ##### plot_posteriors()
 
