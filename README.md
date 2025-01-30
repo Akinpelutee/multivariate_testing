@@ -59,22 +59,22 @@ import matplotlib.pyplot as plt
 from scipy.stats import beta
 
 class BayesianMultivariateTest:
-    def __init__(self, data):
+    def __init__(self, data_path):
         """
-        Initialize with the multivariate test data.
+        Initialize with the multivariate test data from a CSV file.
         Args:
-        - data (DataFrame): A DataFrame with columns ['Combination', 'Conversions', 'Visitors'].
+        - data_path (str): Path to the CSV file containing ['Combination', 'Conversions', 'Visitors'].
         """
-        self.data = data
+        self.data = pd.read_csv(data_path)
         self.data['NonConversions'] = self.data['Visitors'] - self.data['Conversions']
-        self.data['Alpha'] = 1 + self.data['Conversions']
-        self.data['Beta'] = 1 + self.data['NonConversions']
         self.posteriors = {}
-        
-        # Initialize priors for the first day (can be adjusted if needed)
+
+    # Initialize priors for the first day (can be adjusted if needed)
         self.prior_alpha = 1
         self.prior_beta = 1
 
+
+    
     def calculate_posteriors(self):
         """Calculate posterior distributions for each combination."""
         # Ensure required columns exist
@@ -108,51 +108,28 @@ class BayesianMultivariateTest:
             # Update the prior for the next day
             self.prior_alpha = posterior.args[0]  # Alpha from the posterior becomes the prior for the next day
             self.prior_beta = posterior.args[1]   # Beta from the posterior becomes the prior for the next day
-        
+   
+    
     def probability_of_being_best(self, n_samples=100_000):
-        """
-        Calculate the probability of each combination being the best.
-        Args:
-        - n_samples (int): Number of samples for Monte Carlo simulation.
-        """
-        # Sample conversion rates from posterior distributions
-        sampled_rates = {
-            Combination: posterior.rvs(n_samples)
-            for Combination, posterior in self.posteriors.items()
-        }
-        
-        # Create a DataFrame to hold sampled rates
-        sampled_rates_df = pd.DataFrame(sampled_rates)
-
-        # Find the combination with the highest rate for each sample
-        best_combination = sampled_rates_df.idxmax(axis=1)
-
-        # Calculate the probability of each combination being the best
+        """Calculate the probability of each combination being the best."""
+        sampled_rates = {comb: posterior.rvs(n_samples) for comb, posterior in self.posteriors.items()}
+        sampled_df = pd.DataFrame(sampled_rates)
+        best_combination = sampled_df.idxmax(axis=1)
         probabilities = best_combination.value_counts(normalize=True)
-        
-        # Fill in probabilities for all combinations (in case some have 0 probability)
-        all_combinations = self.data['Combination'].unique()
-        probabilities = probabilities.reindex(all_combinations, fill_value=0)
-        
-        return probabilities
+        return probabilities.reindex(self.data['Combination'].unique(), fill_value=0)
 
     def plot_posteriors(self):
-        """
-        Plot the posterior distributions for each combination.
-        """
+        """Plot the posterior distributions for each combination."""
         x = np.linspace(0, 1, 1000)
         plt.figure(figsize=(10, 6))
-
-        for Combination, posterior in self.posteriors.items():
-            y = posterior.pdf(x)
-            plt.plot(x, y, label=f"{Combination} (Beta({posterior.args[0]}, {posterior.args[1]}))")
-
-        plt.title("Posterior Distributions of Combinations")
+        for comb, posterior in self.posteriors.items():
+            plt.plot(x, posterior.pdf(x), label=f"{comb} (Beta({posterior.args[0]:.2f}, {posterior.args[1]:.2f}))")
+        plt.title("Posterior Distributions")
         plt.xlabel("Conversion Rate")
         plt.ylabel("Density")
         plt.legend()
-        plt.grid()
         plt.show()
+
 
     def summary(self):
         """
@@ -182,90 +159,51 @@ class BayesianMultivariateTest:
         return CI_mean
 
     def estimate_days_to_run_exp(self, daily_visitors, threshold=0.95, max_days=14):
-        """
-        Estimate the number of days required to run the experiment.
-        
-        Args:
-        - daily_visitors (int): Number of visitors per day per combination.
-        - threshold (float): Probability threshold for one combination being the best.
-        - max_days (int): Maximum number of days to simulate.
-        
-        Returns:
-        - days (int): Estimated number of days required to meet the threshold.
-        """
-        # Initialize running totals for each combination
+        """Estimate the number of days required to run the experiment."""
         np.random.seed(42)
         cumulative_conversions = {comb: 0 for comb in self.data['Combination']}
         cumulative_visitors = {comb: 0 for comb in self.data['Combination']}
         
         for day in range(1, max_days + 1):
-            # Simulate daily visitors for each combination
             for _, row in self.data.iterrows():
                 comb = row['Combination']
-                true_rate = row['Conversions'] / row['Visitors']  # True conversion rate (assumed)
+                true_rate = row['Conversions'] / row['Visitors']
                 daily_conversions = np.random.binomial(daily_visitors, true_rate)
-                
-                # Update cumulative data
                 cumulative_conversions[comb] += daily_conversions
                 cumulative_visitors[comb] += daily_visitors
-            
-            # Update posteriors
+
             self.posteriors = {
-                comb: beta(
-                    1 + cumulative_conversions[comb],
-                    1 + (cumulative_visitors[comb] - cumulative_conversions[comb])
-                )
+                comb: beta(1 + cumulative_conversions[comb], 1 + (cumulative_visitors[comb] - cumulative_conversions[comb]))
                 for comb in cumulative_conversions
             }
             
-            # Update prior for the next day based on the current day's posterior
-            self.update_prior_with_posterior()
-            
-            # Calculate probabilities of being the best
             probabilities = self.probability_of_being_best()
-            
-            # Check if any combination exceeds the threshold
             if probabilities.max() >= threshold:
                 return day
         
-        # If max_days is reached without convergence
         return max_days
 
+if __name__ == "__main__":
+    test = BayesianMultivariateTest("data.csv")
+    test.calculate_posteriors()
+    test.plot_posteriors()
 
-# Input Data (Example for day 1)
-data = pd.DataFrame({
-    'Combination': ['H1 + B1', 'H1 + B2', 'H2 + B1', 'H2 + B2'],
-    'Conversions': [3, 5, 7, 10],
-    'Visitors': [50, 50, 50, 50]
-})
+    #test.update_prior_with_posterior()
+    
+    summary = test.summary()
+    print(summary)
+    print("Probabilities of being the best:")
+    
+    print(test.probability_of_being_best())
+    
+    days_required = test.estimate_days_to_run_exp(daily_visitors=50)
+    print(f"Estimated days to run: {days_required}days")
 
+    CI_mean = test.get_posterior_summary()
+    print(CI_mean)
 
-# Run Bayesian Multivariate Test
-test = BayesianMultivariateTest(data_day_1)
-posteriors_day_1 = test.calculate_posteriors()
+    
 
-#test.update_prior_with_posterior()
-
-# Plot Posterior Distributions
-test.plot_posteriors()
-
-# Show Summary
-summary = test.summary()
-print(summary)
-
-# Show Probabilities of Being the Best
-probabilities = test.probability_of_being_best()
-print("\nProbabilities of Each Combination Being the Best:")
-print(probabilities)
-
-# Estimate the number of days required to run the experiment
-daily_visitors = 50  # Assume 50 visitors per day per combination
-days_required = test.estimate_days_to_run_exp(daily_visitors, threshold=0.95)
-
-print(f"Estimated days required to run the experiment: {days_required} days\n")
-
-CI_mean = test.get_posterior_summary()
-print(CI_mean)
 
 ~~~
 
@@ -277,14 +215,9 @@ Save bayesian_test.py in your project directory and import it
 from bayesian_test import BayesianMultivariateTest
 import pandas as pd
 ~~~
-
-#### 2) Load Data
+#### 2) Update Priors for Continuous Testing
 ~~~python
-data = pd.DataFrame({
-    'Combination': ['H1 + B1', 'H1 + B2', 'H2 + B1', 'H2 + B2'],
-    'Conversions': [3, 5, 7, 10],
-    'Visitors': [50, 50, 50, 50]
-})
+test.update_prior_with_posterior()
 ~~~
 
 #### 3) Run Bayesian Test
@@ -305,9 +238,6 @@ print(probabilities)
 days_needed = test.estimate_days_to_run_exp(daily_visitors=50, threshold=0.95, max_days=14)
 print(f"Estimated days to run: {days_needed}")
 ~~~
-#### 6) Update Priors for Continuous Testing
-~~~python
-test.update_prior_with_posterior()
-~~~
+
 
 ~~~
