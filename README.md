@@ -23,6 +23,10 @@ data_day_1 = pd.DataFrame({
 
 ### Functions
 
+#### validate_data()
+
+This function makes sure we have the correct number of features and also handles missing values correctly. It raises a ValueError which prompts user to input any missing data correctly before analysis.
+
 ##### calculate_posteriors()
 
 Calculates the posterior Beta distributions for each variant based on prior data and observed conversions.
