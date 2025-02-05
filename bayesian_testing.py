@@ -128,3 +128,78 @@ if __name__ == "__main__":
 
     days_required = test.estimate_days_to_run_exp(daily_visitors=50)
     print(f"Estimated days to run: {days_required} days")
+
+
+
+import numpy as np
+import argparse
+from scipy.stats import beta
+
+def bayesian_duration(
+    baseline_rate,  
+    mde,            
+    daily_traffic,  
+    num_variations=4,  
+    threshold=0.99,  
+    max_days=1000      
+):
+    """Calculate Bayesian test duration based on given parameters."""
+    np.random.seed(42)
+    
+    # Initialize priors with a stronger belief to speed up convergence
+    priors = {f'variation_{i}': {'alpha': 10, 'beta': 30} for i in range(num_variations)}
+    
+    # Use relative MDE
+    true_rates = [baseline_rate] + [baseline_rate * (1 + mde)] * (num_variations - 1)
+    
+    traffic_per_variation = daily_traffic // num_variations
+    control_key = 'variation_0'
+    
+    for day in range(1, max_days + 1):
+        daily_results = {}
+        
+        # Simulate conversions
+        for i, var in enumerate(priors.keys()):
+            conversions = np.random.binomial(traffic_per_variation, true_rates[i])
+            daily_results[var] = conversions
+        
+        # Update posteriors
+        for var in priors.keys():
+            priors[var]['alpha'] += daily_results[var]
+            priors[var]['beta'] += (traffic_per_variation - daily_results[var])
+        
+        # Thompson Sampling with a large sample size for stability
+        samples = {var: beta.rvs(priors[var]['alpha'], priors[var]['beta'], size=100000) 
+                  for var in priors.keys()}
+        
+        # Compare variations against control
+        control_samples = samples[control_key]
+        best_prob = max(np.mean(samples[var] > control_samples) for var in samples if var != control_key)
+
+        # Stop if a variation is significantly better than control
+        if best_prob >= threshold:
+            return day
+    
+    return max_days
+
+
+if __name__ == "__main__":
+    # Argument parser for command-line execution
+    parser = argparse.ArgumentParser(description="Calculate Bayesian test duration.")
+    
+    parser.add_argument("--baseline", type=float, required=True, help="Baseline conversion rate (e.g., 0.1 for 10%)")
+    parser.add_argument("--mde", type=float, required=True, help="Minimum detectable effect (e.g., 0.1 for 10%)")
+    parser.add_argument("--daily_visitors", type=int, required=True, help="Total daily traffic")
+    parser.add_argument("--variations", type=int, default=4, help="Number of variations (including control)")
+    
+    args = parser.parse_args()
+
+    days_needed = bayesian_duration(
+        baseline_rate=args.baseline,
+        mde=args.mde,
+        daily_traffic=args.daily_visitors,
+        num_variations=args.variations
+    )
+
+    print(f"Estimated days required to run experiment: {days_needed} days")
+
